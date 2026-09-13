@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { PageProps } from './$types';
 	import { Heading, Text, Button } from '$lib/client/ui';
-	import { Download } from 'lucide-svelte';
+	import { Boxes, Download } from 'lucide-svelte';
 
 	let { data }: PageProps = $props();
 
@@ -63,7 +63,16 @@
 						</div>
 					</div>
 
-					<div class="mt-2">
+					<div class="mt-2 flex flex-row gap-4">
+						<Button
+							onclick={() => {
+								window.location.href = `/servers/${data.server.slug}/worlds/${world.id}`;
+							}}
+							icon={Boxes}
+							className="!text-sm !px-4 !py-2"
+						>
+							Addons
+						</Button>
 						<Button
 							onclick={() => {
 								window.location.href = `/servers/${data.server.slug}/worlds/${world.id}/backup`;

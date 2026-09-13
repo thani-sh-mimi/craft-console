@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { Button, HTabs } from '$lib/client/ui';
-	import { LogOut } from 'lucide-svelte';
+	import { Boxes, LogOut } from 'lucide-svelte';
 	import type { LayoutProps } from './$types';
 	import consoleImage from './(assets)/console.png';
 	import playerImage from './(assets)/player.png';
@@ -16,6 +16,7 @@
 	const tabs = [
 		{ id: 'worlds', label: 'Worlds', href: `${base}/worlds`, imageSrc: worldImage },
 		{ id: 'players', label: 'Players', href: `${base}/players`, imageSrc: playerImage },
+		{ id: 'addons', label: 'Addons', href: `${base}/addons`, icon: Boxes },
 		{ id: 'console', label: 'Console', href: `${base}/console`, imageSrc: consoleImage },
 		{ id: 'settings', label: 'Settings', href: `${base}/settings`, imageSrc: serverImage }
 	].map((tab) => ({
