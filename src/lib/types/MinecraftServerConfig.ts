@@ -408,8 +408,37 @@ export const minecraftServerConfigControls = Object.entries(minecraftServerConfi
 );
 
 /**
- * Partial Minecraft server configuration schema
+ * Strip the `.default()` wrapper from a field schema, if it has one, so that a
+ * missing key parses to `undefined` instead of falling back to its default.
  */
-export const partialMinecraftConfigSchema = Object.fromEntries(
-	Object.entries(minecraftServerConfigSchema.shape).map(([key, schema]) => [key, schema.optional()])
-);
+function withoutDefault(schema: z.ZodType): z.ZodType {
+	// `unwrap()` is typed with Zod's core schema interface; cast back to the
+	// classic one the rest of this module is written against.
+	return schema instanceof z.ZodDefault ? (schema.unwrap() as z.ZodType) : schema;
+}
+
+type ConfigShape = typeof minecraftServerConfigSchema.shape;
+type PartialConfigShape = { [K in keyof ConfigShape]: z.ZodOptional<ConfigShape[K]> };
+
+const partialConfigShape = Object.fromEntries(
+	Object.entries(minecraftServerConfigSchema.shape).map(([key, schema]) => [
+		key,
+		withoutDefault(schema).optional()
+	])
+) as PartialConfigShape;
+
+/**
+ * Partial Minecraft server configuration schema, for patch-style updates where
+ * only the fields the caller sent may be written.
+ *
+ * `minecraftServerConfigSchema.partial()` cannot be used for this: `.partial()`
+ * only wraps every field in `.optional()`, and `ZodDefault` still resolves a
+ * missing key to its default. Parsing `{ 'max-players': 25 }` with it returns
+ * *every* field — the one change plus the default of every other field — and
+ * merging that back into server.properties resets all untouched settings.
+ *
+ * The defaults are stripped before the fields are made optional, so absent keys
+ * stay absent while present keys keep their coercion and validation
+ * (`Number(...)`, `String(...) === 'true'`, enums, min/max, ...).
+ */
+export const partialMinecraftConfigSchema = z.object(partialConfigShape);
