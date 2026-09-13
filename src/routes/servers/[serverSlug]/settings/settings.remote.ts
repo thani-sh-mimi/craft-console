@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { command } from '$app/server';
 import { setServerConfig } from '$lib/server/minecraft';
-import { minecraftServerConfigSchema } from '$lib/types/MinecraftServerConfig';
+import { partialMinecraftConfigSchema } from '$lib/types/MinecraftServerConfig';
 
 /**
  * Schema for the updateServerConfig command argument.
@@ -9,7 +9,7 @@ import { minecraftServerConfigSchema } from '$lib/types/MinecraftServerConfig';
  */
 const updateSchema = z.object({
 	slug: z.string(),
-	changes: minecraftServerConfigSchema.partial()
+	changes: partialMinecraftConfigSchema
 });
 
 /**
