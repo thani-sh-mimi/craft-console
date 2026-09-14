@@ -30,6 +30,13 @@ export interface PackReference {
 	version: number[];
 }
 
+/**
+ * How much an uploaded archive is allowed to expand to once unpacked. The
+ * upload itself is capped in the route; this bounds what that upload can grow
+ * into on disk.
+ */
+export const maxExtractedAddonSize = 512 * 1024 * 1024;
+
 export interface InstalledAddon {
 	type: AddonType;
 	/** Folder name inside the pack directory. */
@@ -106,15 +113,53 @@ async function pathExists(target: string): Promise<boolean> {
 	}
 }
 
+function formatMegabytes(bytes: number): string {
+	const megabytes = bytes / (1024 * 1024);
+	return `${megabytes < 10 ? megabytes.toFixed(1) : Math.round(megabytes)} MB`;
+}
+
+/** Total size of every file below a directory. */
+async function directorySize(dir: string): Promise<number> {
+	let total = 0;
+
+	let entries;
+	try {
+		entries = await fs.readdir(dir, { withFileTypes: true });
+	} catch {
+		return total;
+	}
+
+	for (const entry of entries) {
+		const entryPath = path.join(dir, entry.name);
+		if (entry.isDirectory()) {
+			total += await directorySize(entryPath);
+		} else if (entry.isFile()) {
+			try {
+				total += (await fs.stat(entryPath)).size;
+			} catch {
+				// Removed while walking; nothing to count.
+			}
+		}
+	}
+
+	return total;
+}
+
 /**
- * Determine which pack directory a manifest belongs in. Packs that only declare
- * module types we cannot install (skin packs, world templates) return null.
+ * Determine which pack directories a manifest belongs in. A pack can declare
+ * several module types at once ("combined" packs: resources *and* data/script),
+ * and each half only loads from its own directory, so such a pack is copied into
+ * every matching directory. Packs that only declare module types we cannot
+ * install (skin packs, world templates) return an empty list.
  */
-export function addonTypeFromManifest(manifest: PackManifest): AddonType | null {
-	const moduleTypes = (manifest.modules ?? []).map((module) => module.type);
-	if (moduleTypes.includes('resources')) return 'resource';
-	if (moduleTypes.includes('data') || moduleTypes.includes('script')) return 'behavior';
-	return null;
+export function addonTypesFromManifest(manifest: PackManifest): AddonType[] {
+	const moduleTypes = new Set((manifest.modules ?? []).map((module) => module.type));
+	const types: AddonType[] = [];
+
+	if (moduleTypes.has('data') || moduleTypes.has('script')) types.push('behavior');
+	if (moduleTypes.has('resources')) types.push('resource');
+
+	return types;
 }
 
 function readManifestFields(manifest: PackManifest): { uuid: string; version: number[] } {
@@ -202,35 +247,38 @@ export async function getInstalledAddons(slug: string): Promise<InstalledAddons>
 	return { addons, invalid };
 }
 
-/** Find the folder of an already installed pack by uuid, within one pack directory. */
-async function findAddonFolderByUuid(
+/**
+ * Find the folders holding a pack with this uuid inside one pack directory. A
+ * combined pack has one folder per directory, so every match has to be replaced.
+ */
+async function findAddonFoldersByUuid(
 	slug: string,
+	type: AddonType,
 	uuid: string
-): Promise<{ type: AddonType; folder: string } | null> {
-	for (const type of addonTypes) {
-		const dir = addonDir(slug, type);
+): Promise<string[]> {
+	const dir = addonDir(slug, type);
+	const folders: string[] = [];
 
-		let entries;
+	let entries;
+	try {
+		entries = await fs.readdir(dir, { withFileTypes: true });
+	} catch {
+		return folders;
+	}
+
+	for (const entry of entries) {
+		if (!entry.isDirectory()) continue;
 		try {
-			entries = await fs.readdir(dir, { withFileTypes: true });
+			const manifest = JSON.parse(
+				await fs.readFile(path.join(dir, entry.name, 'manifest.json'), 'utf8')
+			) as PackManifest;
+			if (manifest.header?.uuid === uuid) folders.push(entry.name);
 		} catch {
 			continue;
 		}
-
-		for (const entry of entries) {
-			if (!entry.isDirectory()) continue;
-			try {
-				const manifest = JSON.parse(
-					await fs.readFile(path.join(dir, entry.name, 'manifest.json'), 'utf8')
-				) as PackManifest;
-				if (manifest.header?.uuid === uuid) return { type, folder: entry.name };
-			} catch {
-				continue;
-			}
-		}
 	}
 
-	return null;
+	return folders;
 }
 
 async function findManifests(root: string, maxDepth: number): Promise<string[]> {
@@ -260,20 +308,36 @@ async function findManifests(root: string, maxDepth: number): Promise<string[]> 
 
 /**
  * Install every pack found inside an uploaded archive (.mcpack, .mcaddon or a
- * plain zip). Packs are copied into their type directory; an existing pack with
- * the same uuid is replaced.
+ * plain zip). Packs are copied into their type directory — a combined pack, one
+ * that declares both resources and data/script modules, is copied into both —
+ * and an existing pack with the same uuid is replaced.
+ *
+ * `maxExtractedSize` bounds how much the archive is allowed to expand to. It is
+ * applied after unpacking, so it catches the realistic case (a big texture pack
+ * that the admin did not realise would blow up the disk) rather than a
+ * deliberately crafted bomb; bounding that needs a central-directory pre-scan.
  */
 export async function installAddonArchive(
 	slug: string,
 	data: Buffer,
-	filename: string
+	filename: string,
+	options: { maxExtractedSize?: number } = {}
 ): Promise<InstallResult> {
+	const maxExtractedSize = options.maxExtractedSize ?? maxExtractedAddonSize;
 	const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'craft-console-addon-'));
 	const installed: InstalledAddon[] = [];
 	const skipped: SkippedPack[] = [];
 
 	try {
 		await decompress(data, tempDir);
+
+		const extractedSize = await directorySize(tempDir);
+		if (extractedSize > maxExtractedSize) {
+			throw new Error(
+				`"${filename}" expands to ${formatMegabytes(extractedSize)}, more than the ` +
+					`${formatMegabytes(maxExtractedSize)} limit.`
+			);
+		}
 
 		const manifests = await findManifests(tempDir, 3);
 		if (manifests.length === 0) {
@@ -285,8 +349,8 @@ export async function installAddonArchive(
 
 			try {
 				const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8')) as PackManifest;
-				const type = addonTypeFromManifest(manifest);
-				if (!type) {
+				const types = addonTypesFromManifest(manifest);
+				if (types.length === 0) {
 					skipped.push({
 						name: manifest.header?.name?.trim() || path.basename(packRoot),
 						reason: 'pack has no resources or data modules'
@@ -295,37 +359,45 @@ export async function installAddonArchive(
 				}
 
 				const { uuid, version } = readManifestFields(manifest);
+				const baseName = sanitizeFolderName(manifest.header?.name ?? path.basename(packRoot));
 
-				// A uuid identifies a pack, so an upload of a new version replaces the old folder.
-				const existing = await findAddonFolderByUuid(slug, uuid);
-				if (existing) {
-					await fs.rm(path.join(addonDir(slug, existing.type), existing.folder), {
-						recursive: true,
-						force: true
+				// A uuid identifies a pack, so an upload of a new version replaces every
+				// folder already holding it — including the second copy of a combined pack.
+				for (const type of types) {
+					for (const folder of await findAddonFoldersByUuid(slug, type, uuid)) {
+						await fs.rm(path.join(addonDir(slug, type), folder), {
+							recursive: true,
+							force: true
+						});
+					}
+				}
+
+				for (const type of types) {
+					let folder = baseName;
+					for (
+						let suffix = 2;
+						await pathExists(path.join(addonDir(slug, type), folder));
+						suffix++
+					) {
+						folder = `${baseName} (${suffix})`;
+					}
+
+					const target = path.join(addonDir(slug, type), folder);
+					await fs.mkdir(path.dirname(target), { recursive: true });
+					// The archive was unpacked in the temp dir, which can be another filesystem.
+					await fs.cp(packRoot, target, { recursive: true });
+
+					installed.push({
+						type,
+						folder,
+						uuid,
+						name: manifest.header?.name?.trim() || folder,
+						description: manifest.header?.description?.trim() || undefined,
+						version,
+						versionLabel: version.join('.'),
+						hasScripts: (manifest.modules ?? []).some((module) => module.type === 'script')
 					});
 				}
-
-				const baseName = sanitizeFolderName(manifest.header?.name ?? path.basename(packRoot));
-				let folder = baseName;
-				for (let suffix = 2; await pathExists(path.join(addonDir(slug, type), folder)); suffix++) {
-					folder = `${baseName} (${suffix})`;
-				}
-
-				const target = path.join(addonDir(slug, type), folder);
-				await fs.mkdir(path.dirname(target), { recursive: true });
-				// The archive was unpacked in the temp dir, which can be another filesystem.
-				await fs.cp(packRoot, target, { recursive: true });
-
-				installed.push({
-					type,
-					folder,
-					uuid,
-					name: manifest.header?.name?.trim() || folder,
-					description: manifest.header?.description?.trim() || undefined,
-					version,
-					versionLabel: version.join('.'),
-					hasScripts: (manifest.modules ?? []).some((module) => module.type === 'script')
-				});
 			} catch (err) {
 				skipped.push({
 					name: path.basename(packRoot),

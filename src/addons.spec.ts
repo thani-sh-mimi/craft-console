@@ -5,7 +5,7 @@ import { PassThrough } from 'stream';
 import { ZipArchive } from 'archiver';
 import {
 	addonDir,
-	addonTypeFromManifest,
+	addonTypesFromManifest,
 	getInstalledAddons,
 	getWorldAddons,
 	installAddonArchive,
@@ -59,12 +59,17 @@ describe('Addon management', () => {
 		await fs.rm(serverDir, { recursive: true, force: true }).catch(() => {});
 	});
 
-	it('detects the pack type from the manifest modules', () => {
-		expect(addonTypeFromManifest({ modules: [{ type: 'data' }] })).toBe('behavior');
-		expect(addonTypeFromManifest({ modules: [{ type: 'script' }] })).toBe('behavior');
-		expect(addonTypeFromManifest({ modules: [{ type: 'resources' }] })).toBe('resource');
-		expect(addonTypeFromManifest({ modules: [{ type: 'skin_pack' }] })).toBeNull();
-		expect(addonTypeFromManifest({})).toBeNull();
+	it('detects the pack directories from the manifest modules', () => {
+		expect(addonTypesFromManifest({ modules: [{ type: 'data' }] })).toEqual(['behavior']);
+		expect(addonTypesFromManifest({ modules: [{ type: 'script' }] })).toEqual(['behavior']);
+		expect(addonTypesFromManifest({ modules: [{ type: 'resources' }] })).toEqual(['resource']);
+		// A combined pack declares both halves and belongs in both directories.
+		expect(addonTypesFromManifest({ modules: [{ type: 'resources' }, { type: 'data' }] })).toEqual([
+			'behavior',
+			'resource'
+		]);
+		expect(addonTypesFromManifest({ modules: [{ type: 'skin_pack' }] })).toEqual([]);
+		expect(addonTypesFromManifest({})).toEqual([]);
 	});
 
 	it('installs an uploaded resource pack', async () => {
@@ -158,6 +163,112 @@ describe('Addon management', () => {
 		expect(result.installed).toEqual([]);
 		expect(result.skipped).toEqual([
 			{ name: 'Skin Pack', reason: 'pack has no resources or data modules' }
+		]);
+	});
+
+	it('installs a combined pack into both pack directories', async () => {
+		const archive = await makeArchive({
+			'manifest.json': manifest('66666666', [3, 0, 0], 'Combined Pack', ['resources', 'data']),
+			'textures/icon.txt': 'texture'
+		});
+
+		const result = await installAddonArchive(slug, archive, 'combined.mcpack');
+		expect(result.skipped).toEqual([]);
+		expect(result.installed.map((addon) => addon.type)).toEqual(['behavior', 'resource']);
+
+		// Each half only loads from its own directory, so both hold the pack.
+		for (const type of ['behavior', 'resource'] as const) {
+			expect(
+				await fs.readFile(
+					path.join(addonDir(slug, type), 'Combined Pack', 'textures/icon.txt'),
+					'utf8'
+				)
+			).toBe('texture');
+		}
+
+		expect(await getInstalledAddons(slug)).toMatchObject({
+			invalid: [],
+			addons: [
+				{ type: 'behavior', folder: 'Combined Pack' },
+				{ type: 'resource', folder: 'Combined Pack' }
+			]
+		});
+	});
+
+	it('replaces both copies of a combined pack when it is uploaded again', async () => {
+		const combined = (version: number[], file: string) =>
+			makeArchive({
+				'manifest.json': manifest('77777777', version, 'Combined Pack', ['resources', 'data']),
+				[file]: 'content'
+			});
+
+		await installAddonArchive(slug, await combined([1, 0, 0], 'old.txt'), 'combined.mcpack');
+		await installAddonArchive(slug, await combined([1, 1, 0], 'new.txt'), 'combined-2.mcpack');
+
+		const installed = await getInstalledAddons(slug);
+		expect(installed.addons).toHaveLength(2);
+
+		for (const type of ['behavior', 'resource'] as const) {
+			const folder = path.join(addonDir(slug, type), 'Combined Pack');
+			expect(await fs.readFile(path.join(folder, 'new.txt'), 'utf8')).toBe('content');
+			await expect(fs.readFile(path.join(folder, 'old.txt'), 'utf8')).rejects.toThrow();
+		}
+	});
+
+	it('installs a pack that bundles other packs, so its dependencies are active', async () => {
+		const archive = await makeArchive({
+			'Bundle/manifest.json': manifest('aaaa1111', [1, 0, 0], 'Bundle', ['resources']),
+			'Bundle/deps/Helper/manifest.json': manifest('bbbb2222', [1, 0, 0], 'Helper', ['data'])
+		});
+
+		const result = await installAddonArchive(slug, archive, 'bundle.mcaddon');
+		expect(result.skipped).toEqual([]);
+		expect(result.installed.map((addon) => addon.name).sort()).toEqual(['Bundle', 'Helper']);
+	});
+
+	it('refuses an archive that expands past the extracted size limit', async () => {
+		const archive = await makeArchive({
+			'manifest.json': manifest('88888888', [1, 0, 0], 'Huge Textures', ['resources']),
+			'textures/big.bin': 'x'.repeat(64 * 1024)
+		});
+
+		await expect(
+			installAddonArchive(slug, archive, 'huge.mcpack', { maxExtractedSize: 16 * 1024 })
+		).rejects.toThrow(/expands to .* more than the .* limit/);
+
+		// Nothing is installed and the unpacked copy is cleaned up.
+		expect(await getInstalledAddons(slug)).toEqual({ addons: [], invalid: [] });
+		expect(await fs.readdir(serverDir)).toEqual([]);
+	});
+
+	it('never lets archive entries escape the pack directories', async () => {
+		// A traversal path is refused outright...
+		await expect(
+			installAddonArchive(
+				slug,
+				await makeArchive({
+					'pack/manifest.json': manifest('99999999', [1, 0, 0], 'Escape Pack', ['resources']),
+					'pack/../../../etc/thing.txt': 'thing'
+				}),
+				'escape.mcpack'
+			)
+		).rejects.toThrow();
+		expect(await fs.readdir(serverDir)).toEqual([]);
+
+		// ...while an absolute or leading-`..` name is flattened into the unpack
+		// directory, where pack discovery ignores it.
+		const result = await installAddonArchive(
+			slug,
+			await makeArchive({
+				'pack/manifest.json': manifest('99999999', [1, 0, 0], 'Escape Pack', ['resources']),
+				'../escaped.txt': 'escaped'
+			}),
+			'escape.mcpack'
+		);
+		expect(result.installed.map((addon) => addon.folder)).toEqual(['Escape Pack']);
+		expect(await fs.readdir(serverDir)).toEqual(['resource_packs']);
+		expect(await fs.readdir(path.join(addonDir(slug, 'resource'), 'Escape Pack'))).toEqual([
+			'manifest.json'
 		]);
 	});
 

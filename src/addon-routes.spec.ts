@@ -124,6 +124,19 @@ describe('Addons page route', () => {
 		expect(result.data?.error).toBe('Please select an addon file to upload.');
 	});
 
+	it('rejects an oversized upload before reading the body', async () => {
+		// Only headers are needed: the size guard runs before request.formData(),
+		// so an oversized body is never buffered.
+		const request = { headers: new Headers({ 'content-length': String(200 * 1024 * 1024) }) };
+
+		const result = (await addonActions.upload(
+			event<UploadEvent>({ serverSlug: slug }, request as unknown as Request)
+		)) as { status?: number; data?: { error: string } };
+
+		expect(result.status).toBe(413);
+		expect(result.data?.error).toContain('larger than 128 MB');
+	});
+
 	it('deletes an installed pack', async () => {
 		await installAddon('b1', [1, 0, 0], 'Old Behavior', 'data');
 

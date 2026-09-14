@@ -9,6 +9,8 @@ import {
 
 const addonExtensions = ['.mcpack', '.mcaddon', '.zip'];
 const maxAddonSize = 128 * 1024 * 1024;
+/** Multipart bodies carry boundaries and a header per part, so allow some slack. */
+const maxAddonRequestSize = maxAddonSize + 1024 * 1024;
 
 export const load: PageServerLoad = async ({ params }) => {
 	return await getInstalledAddons(params.serverSlug);
@@ -16,6 +18,16 @@ export const load: PageServerLoad = async ({ params }) => {
 
 export const actions = {
 	upload: async ({ params, request }) => {
+		// Reject an oversized body before buffering it: request.formData() reads the
+		// whole multipart body into memory, so a size check applied afterwards still
+		// pays for the memory (and blocks the event loop) first.
+		const declaredSize = Number(request.headers.get('content-length') ?? '');
+		if (Number.isFinite(declaredSize) && declaredSize > maxAddonRequestSize) {
+			return fail(413, {
+				error: `Upload is larger than ${maxAddonSize / (1024 * 1024)} MB.`
+			});
+		}
+
 		const form = await request.formData();
 		const file = form.get('addonFile') as File | null;
 
@@ -30,7 +42,7 @@ export const actions = {
 		}
 
 		if (file.size > maxAddonSize) {
-			return fail(400, {
+			return fail(413, {
 				error: `"${file.name}" is larger than ${maxAddonSize / (1024 * 1024)} MB.`
 			});
 		}
@@ -42,7 +54,8 @@ export const actions = {
 				file.name
 			);
 
-			const installed = result.installed.map((addon) => addon.name).join(', ');
+			// A combined pack is installed once per pack directory, so report it once.
+			const installed = [...new Set(result.installed.map((addon) => addon.name))].join(', ');
 			const skipped = result.skipped.map((pack) => `${pack.name} (${pack.reason})`).join(', ');
 
 			return {
