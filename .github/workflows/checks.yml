@@ -39,4 +39,7 @@ jobs:
         run: yarn check
 
       - name: Formatting
-        run: yarn prettier --check .
+        run: yarn format:check
+
+      # ESLint is not wired in yet: `yarn lint` has 17 errors on main, tracked in
+      # https://github.com/thani-sh/craft-console/issues/4
