@@ -161,23 +161,29 @@
 	<div class="flex flex-col gap-4 border-4 border-zinc-700 bg-zinc-800 p-6">
 		<Heading className="text-2xl">Server Update</Heading>
 
-		<div class="flex flex-col gap-4 sm:flex-row sm:items-center justify-between">
+		<div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
 			<div class="flex flex-col gap-1">
 				<Text>
 					Current Version: <span class="font-mono font-bold text-white">{data.server.version}</span>
 				</Text>
 				<Text>
-					Latest Version: <span class="font-mono font-bold text-white">{data.server.latestVersion}</span>
+					Latest Version: <span class="font-mono font-bold text-white"
+						>{data.server.latestVersion}</span
+					>
 				</Text>
 			</div>
 
 			<div class="flex items-center gap-2">
 				{#if data.server.updateAvailable}
-					<span class="rounded bg-yellow-500/20 px-3 py-1.5 text-sm font-bold text-yellow-300 border border-yellow-500/30">
+					<span
+						class="rounded border border-yellow-500/30 bg-yellow-500/20 px-3 py-1.5 text-sm font-bold text-yellow-300"
+					>
 						Update available
 					</span>
 				{:else}
-					<span class="rounded bg-green-500/20 px-3 py-1.5 text-sm font-bold text-green-300 border border-green-500/30">
+					<span
+						class="rounded border border-green-500/30 bg-green-500/20 px-3 py-1.5 text-sm font-bold text-green-300"
+					>
 						Already on latest
 					</span>
 				{/if}
@@ -193,7 +199,8 @@
 		{#if data.server.updateAvailable}
 			{#if data.server.status === 'running'}
 				<p class="border-4 border-yellow-500 bg-yellow-900/50 px-4 py-3 text-lg text-yellow-300">
-					Warning: The server is currently running. Please stop the server before installing updates.
+					Warning: The server is currently running. Please stop the server before installing
+					updates.
 				</p>
 			{/if}
 

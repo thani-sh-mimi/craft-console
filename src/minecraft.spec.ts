@@ -1,10 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'fs';
 import path from 'path';
-import {
-	getServerVersionInfo,
-	getLatestVersionInfo
-} from './lib/server/minecraft';
+import { getServerVersionInfo, getLatestVersionInfo } from './lib/server/minecraft';
 
 describe('Minecraft Server Version Tests', () => {
 	const slug = 'test-server-temp';
@@ -52,7 +49,8 @@ describe('Minecraft Server Version Tests', () => {
 				links: [
 					{
 						downloadType: 'serverBedrockLinux',
-						downloadUrl: 'https://net-secondary.web.minecraft-services.net/api/v1.0/download/links/bedrock-server-1.21.2.02.zip'
+						downloadUrl:
+							'https://net-secondary.web.minecraft-services.net/api/v1.0/download/links/bedrock-server-1.21.2.02.zip'
 					}
 				]
 			}
@@ -69,7 +67,8 @@ describe('Minecraft Server Version Tests', () => {
 		const latestInfo = await getLatestVersionInfo('serverBedrockLinux');
 		expect(latestInfo).toEqual({
 			version: '1.21.2.02',
-			downloadUrl: 'https://net-secondary.web.minecraft-services.net/api/v1.0/download/links/bedrock-server-1.21.2.02.zip'
+			downloadUrl:
+				'https://net-secondary.web.minecraft-services.net/api/v1.0/download/links/bedrock-server-1.21.2.02.zip'
 		});
 
 		global.fetch = originalFetch;

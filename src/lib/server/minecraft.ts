@@ -273,7 +273,10 @@ export interface LatestVersionInfo {
 	downloadUrl: string;
 }
 
-let cachedLinks: { data: { result?: { links?: MinecraftDownloadLink[] } }; timestamp: number } | null = null;
+let cachedLinks: {
+	data: { result?: { links?: MinecraftDownloadLink[] } };
+	timestamp: number;
+} | null = null;
 const CACHE_TTL = 3600 * 1000; // 1 hour
 
 async function fetchDownloadLinks() {
@@ -291,7 +294,9 @@ async function fetchDownloadLinks() {
 	return data;
 }
 
-export async function getServerVersionInfo(slug: string): Promise<{ version: string; downloadType: string; downloadUrl?: string }> {
+export async function getServerVersionInfo(
+	slug: string
+): Promise<{ version: string; downloadType: string; downloadUrl?: string }> {
 	const serverDir = getServerDir(slug);
 	const versionPath = path.join(serverDir, 'version.json');
 	try {
@@ -310,7 +315,9 @@ export async function getServerVersionInfo(slug: string): Promise<{ version: str
 	}
 }
 
-export async function getLatestVersionInfo(downloadType: string): Promise<LatestVersionInfo | null> {
+export async function getLatestVersionInfo(
+	downloadType: string
+): Promise<LatestVersionInfo | null> {
 	try {
 		const data = await fetchDownloadLinks();
 		const links = (data?.result?.links || []) as MinecraftDownloadLink[];
