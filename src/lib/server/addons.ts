@@ -412,8 +412,33 @@ export async function installAddonArchive(
 	}
 }
 
-/** Delete an installed pack folder. */
-export async function removeAddon(slug: string, type: AddonType, folder: string): Promise<void> {
+/** Read the pack uuid from a folder's manifest, if it has a readable one. */
+async function readAddonUuid(folderPath: string): Promise<string | null> {
+	try {
+		const manifest = JSON.parse(
+			await fs.readFile(path.join(folderPath, 'manifest.json'), 'utf8')
+		) as PackManifest;
+		return typeof manifest.header?.uuid === 'string' ? manifest.header.uuid : null;
+	} catch {
+		return null;
+	}
+}
+
+export interface RemoveResult {
+	/** Every folder that was deleted, across pack directories. */
+	removed: { type: AddonType; folder: string }[];
+}
+
+/**
+ * Delete an installed pack folder, together with any copy of the same pack in the
+ * other directory — a combined pack lives in both, so deleting it from one
+ * section has to take the other half with it.
+ */
+export async function removeAddon(
+	slug: string,
+	type: AddonType,
+	folder: string
+): Promise<RemoveResult> {
 	if (!folder || folder === '.' || folder === '..' || folder !== path.basename(folder)) {
 		throw new Error('Invalid addon folder');
 	}
@@ -428,7 +453,25 @@ export async function removeAddon(slug: string, type: AddonType, folder: string)
 		throw new Error('Invalid addon folder');
 	}
 
+	const uuid = await readAddonUuid(target);
 	await fs.rm(target, { recursive: true, force: true });
+
+	const removed: RemoveResult['removed'] = [{ type, folder }];
+
+	if (uuid) {
+		for (const otherType of addonTypes) {
+			if (otherType === type) continue;
+			for (const otherFolder of await findAddonFoldersByUuid(slug, otherType, uuid)) {
+				await fs.rm(path.join(addonDir(slug, otherType), otherFolder), {
+					recursive: true,
+					force: true
+				});
+				removed.push({ type: otherType, folder: otherFolder });
+			}
+		}
+	}
+
+	return { removed };
 }
 
 /** Packs enabled for a world, as recorded in its world_*_packs.json files. */

@@ -157,6 +157,26 @@ describe('Addons page route', () => {
 		expect(loaded.addons).toEqual([]);
 	});
 
+	it('reports deleting the other half of a combined pack', async () => {
+		await installAddon('c2', [1, 0, 0], 'Combined Pack', 'resources');
+		await installAddon('c2', [1, 0, 0], 'Combined Pack', 'data');
+
+		const form = new FormData();
+		form.append('type', 'behavior');
+		form.append('folder', 'Combined Pack');
+
+		const result = (await addonActions.remove(
+			event<RemoveEvent>({ serverSlug: slug }, post('http://localhost/addons', form))
+		)) as { success?: boolean; message?: string };
+
+		expect(result.message).toBe('Deleted "Combined Pack" and its resource_packs copy.');
+
+		const loaded = (await addonsLoad(event<AddonsLoadEvent>({ serverSlug: slug }))) as {
+			addons: unknown[];
+		};
+		expect(loaded.addons).toEqual([]);
+	});
+
 	it('rejects a delete request without type and folder', async () => {
 		const result = (await addonActions.remove(
 			event<RemoveEvent>({ serverSlug: slug }, post('http://localhost/addons', new FormData()))

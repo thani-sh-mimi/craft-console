@@ -285,6 +285,23 @@ describe('Addon management', () => {
 		expect(await getInstalledAddons(slug)).toEqual({ addons: [], invalid: [] });
 	});
 
+	it('deletes both copies of a combined pack', async () => {
+		const archive = await makeArchive({
+			'manifest.json': manifest('cccc3333', [1, 0, 0], 'Combined Pack', ['resources', 'data'])
+		});
+		await installAddonArchive(slug, archive, 'combined.mcpack');
+		expect((await getInstalledAddons(slug)).addons).toHaveLength(2);
+
+		const result = await removeAddon(slug, 'behavior', 'Combined Pack');
+		expect(result.removed).toEqual([
+			{ type: 'behavior', folder: 'Combined Pack' },
+			{ type: 'resource', folder: 'Combined Pack' }
+		]);
+
+		expect(await getInstalledAddons(slug)).toEqual({ addons: [], invalid: [] });
+		expect(await fs.readdir(addonDir(slug, 'resource'))).toEqual([]);
+	});
+
 	it('refuses to delete outside the pack directories', async () => {
 		await fs.mkdir(path.join(addonDir(slug, 'resource'), 'Real Pack'), { recursive: true });
 

@@ -1,6 +1,7 @@
 import type { Actions, PageServerLoad } from './$types';
 import { fail } from '@sveltejs/kit';
 import {
+	addonDirectories,
 	getInstalledAddons,
 	installAddonArchive,
 	removeAddon,
@@ -85,8 +86,18 @@ export const actions = {
 		}
 
 		try {
-			await removeAddon(params.serverSlug, type, folder);
-			return { success: true, message: `Deleted "${folder}".` };
+			const result = await removeAddon(params.serverSlug, type, folder);
+			const elsewhere = result.removed.filter((entry) => entry.type !== type);
+
+			return {
+				success: true,
+				message:
+					elsewhere.length > 0
+						? `Deleted "${folder}" and its ${elsewhere
+								.map((entry) => addonDirectories[entry.type])
+								.join(', ')} copy.`
+						: `Deleted "${folder}".`
+			};
 		} catch (err) {
 			console.error(`Failed to delete addon "${folder}":`, err);
 			return fail(400, {
